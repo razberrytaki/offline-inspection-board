@@ -90,7 +90,7 @@ type api struct {
 func startAPI(t *testing.T) api {
 	t.Helper()
 	hub := &board.Hub{}
-	server := httptest.NewServer(routes(testPool, hub))
+	server := httptest.NewServer(routes(testPool, hub, 25*time.Millisecond))
 	t.Cleanup(server.Close)
 	return api{Server: server, hub: hub}
 }
@@ -215,7 +215,7 @@ func expectRows(t *testing.T, rootID string, want int) {
 	}
 }
 
-func expectOnlyEvent(t *testing.T, events <-chan board.Event, want board.Event) {
+func expectOnlyEvent(t *testing.T, events <-chan board.Row, want board.Row) {
 	t.Helper()
 	select {
 	case event := <-events:
@@ -260,7 +260,7 @@ func TestReplay(t *testing.T) {
 
 func TestReplayAfterLostResponse(t *testing.T) {
 	hub := &board.Hub{}
-	handler := routes(testPool, hub)
+	handler := routes(testPool, hub, 15*time.Second)
 	firstResponse := make(chan response, 1)
 	var disconnected atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -290,9 +290,11 @@ func TestReplayAfterLostResponse(t *testing.T) {
 	if _, err := a.put(t.Context(), cookie, id, body); err == nil {
 		t.Fatal("연결을 닫은 뒤에도 첫 응답을 받았다")
 	}
+	var accepted receipt
 	select {
 	case first := <-firstResponse:
 		first.expect(t, http.StatusCreated)
+		accepted = first.receipt(t, id)
 		retry := a.submit(t, cookie, id, body)
 		retry.expect(t, http.StatusOK)
 		if !bytes.Equal(first.body, retry.body) {
@@ -302,7 +304,7 @@ func TestReplayAfterLostResponse(t *testing.T) {
 		t.Fatal("연결을 닫기 전에 서버가 요청을 저장하지 않았다")
 	}
 	expectRows(t, id, 1)
-	expectOnlyEvent(t, events, board.Event{ID: id, RootID: id})
+	expectOnlyEvent(t, events, pumpRow(id, 0, "normal", "", accepted.ReceivedAt))
 }
 
 func TestContentMismatch(t *testing.T) {
@@ -546,8 +548,11 @@ func (a api) submitConcurrently(t *testing.T, requests []putRequest) []response 
 func TestConcurrentIdenticalPuts(t *testing.T) {
 	a := startAPI(t)
 	cookie := a.login(t, "worker-1")
-	events, unsubscribe := a.hub.Subscribe()
-	t.Cleanup(unsubscribe)
+	supervisor := a.login(t, "supervisor")
+	stream := a.openBoardStream(t, supervisor)
+	if frame := readSSEFrame(t, stream); frame != ":\n" {
+		t.Fatalf("첫 SSE 프레임은 하트비트여야 한다: %q", frame)
+	}
 	id := uuid.NewString()
 	request := putRequest{cookie: cookie, id: id, body: normal(id, 0)}
 	requests := make([]putRequest, 50)
@@ -575,7 +580,18 @@ func TestConcurrentIdenticalPuts(t *testing.T) {
 		t.Fatalf("동시 요청 응답 HTTP 201 %d건, 200 %d건", created, replayed)
 	}
 	expectRows(t, id, 1)
-	expectOnlyEvent(t, events, board.Event{ID: id, RootID: id})
+	want := pumpRow(id, 0, "normal", "", responses[0].receipt(t, id).ReceivedAt)
+	a.expectStreamRow(t, supervisor, stream, want)
+
+	memo := "진동\n재점검"
+	correction := a.save(t, cookie, uuid.NewString(), payload(id, 1, "P-12", "abnormal", memo))
+	want = pumpRow(id, 1, "abnormal", memo, correction.ReceivedAt)
+	a.expectStreamRow(t, supervisor, stream, want)
+
+	// 같은 스트림에서 다음 원본을 받으면 그 전에 발행된 알림을 모두 확인한 셈이다.
+	nextID := uuid.NewString()
+	next := a.save(t, cookie, nextID, normal(nextID, 0))
+	a.expectStreamRow(t, supervisor, stream, pumpRow(nextID, 0, "normal", "", next.ReceivedAt))
 }
 
 func TestConcurrentCorrections(t *testing.T) {
@@ -590,20 +606,21 @@ func TestConcurrentCorrections(t *testing.T) {
 		{cookie: firstDevice, id: uuid.NewString(), body: payload(rootID, 1, "P-12", "abnormal", "누수")},
 		{cookie: secondDevice, id: uuid.NewString(), body: payload(rootID, 1, "P-12", "abnormal", "진동")},
 	}
-	var winnerID string
+	var winner receipt
+	var winnerMemo string
 	var conflicts int
 	for i, res := range a.submitConcurrently(t, requests) {
 		if res.status == http.StatusCreated {
-			winnerID = requests[i].id
-			res.receipt(t, winnerID)
+			winner = res.receipt(t, requests[i].id)
+			winnerMemo = []string{"누수", "진동"}[i]
 			continue
 		}
 		res.conflict(t, "revision_taken")
 		conflicts++
 	}
-	if winnerID == "" || conflicts != 1 {
-		t.Fatalf("동시 정정 응답 불일치: 저장된 ID %q, 409 %d건", winnerID, conflicts)
+	if winner.ID == "" || conflicts != 1 {
+		t.Fatalf("동시 정정 응답 불일치: 저장된 ID %q, 409 %d건", winner.ID, conflicts)
 	}
 	expectRows(t, rootID, 2)
-	expectOnlyEvent(t, events, board.Event{ID: winnerID, RootID: rootID, Revision: 1})
+	expectOnlyEvent(t, events, pumpRow(rootID, 1, "abnormal", winnerMemo, winner.ReceivedAt))
 }

@@ -80,21 +80,33 @@ func (s Sessions) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Sessions) Require(next http.Handler) http.Handler {
+	return s.require("", next)
+}
+
+func (s Sessions) RequireRole(role string, next http.Handler) http.Handler {
+	return s.require(role, next)
+}
+
+func (s Sessions) require(role string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(cookieName)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		var userID string
+		var userID, userRole string
 		err = s.Pool.QueryRow(r.Context(), `
-			SELECT user_id FROM sessions WHERE token = $1 AND expires_at > now()
-		`, cookie.Value).Scan(&userID)
+			SELECT u.id, u.role
+			FROM sessions s JOIN users u ON u.id = s.user_id
+			WHERE s.token = $1 AND s.expires_at > now()
+		`, cookie.Value).Scan(&userID, &userRole)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			w.WriteHeader(http.StatusUnauthorized)
 		case err != nil:
 			sessionError(w, err)
+		case role != "" && userRole != role:
+			w.WriteHeader(http.StatusForbidden)
 		default:
 			ctx := context.WithValue(r.Context(), userIDKey{}, userID)
 			next.ServeHTTP(w, r.WithContext(ctx))

@@ -14,7 +14,7 @@ import (
 
 type Handler struct {
 	Store Store
-	Hub   *board.Hub
+	Board board.Handler
 }
 
 var outcomeResponses = map[Outcome]struct {
@@ -52,7 +52,7 @@ func (h Handler) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if outcome == Created {
-		h.Hub.Publish(board.Event{ID: record.ID, RootID: record.RootID, Revision: record.Revision})
+		h.Board.Notify(r.Context(), record.RootID)
 	}
 
 	response := outcomeResponses[outcome]

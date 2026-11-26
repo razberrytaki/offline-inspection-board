@@ -43,19 +43,23 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           routes(pool, &board.Hub{}),
+		Handler:           routes(pool, &board.Hub{}, 15*time.Second),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	slog.Info("서버 시작", "addr", addr)
 	return server.ListenAndServe()
 }
 
-func routes(pool *pgxpool.Pool, hub *board.Hub) http.Handler {
+func routes(pool *pgxpool.Pool, hub *board.Hub, heartbeatInterval time.Duration) http.Handler {
 	sessions := auth.Sessions{Pool: pool}
-	inspections := inspection.Handler{Store: inspection.Store{Pool: pool}, Hub: hub}
+	boards := board.Handler{Pool: pool, Hub: hub, HeartbeatInterval: heartbeatInterval}
+	inspections := inspection.Handler{Store: inspection.Store{Pool: pool}, Board: boards}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /session", sessions.Login)
 	mux.Handle("PUT /inspections/{id}", sessions.Require(http.HandlerFunc(inspections.Put)))
+	mux.Handle("GET /board", sessions.RequireRole("supervisor", http.HandlerFunc(boards.List)))
+	mux.Handle("GET /board/{rootId}", sessions.RequireRole("supervisor", http.HandlerFunc(boards.Detail)))
+	mux.Handle("GET /board/events", sessions.RequireRole("supervisor", http.HandlerFunc(boards.Events)))
 	return mux
 }
