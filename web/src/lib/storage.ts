@@ -3,6 +3,7 @@ import {
   type Equipment, type InspectionId, type LocalRecord, type User, type UserId,
   isTimestamp, parseEquipmentList, parseLocalRecord, parseUser
 } from './model';
+import { createCorrection, groupRecords, type InspectionEdit } from './corrections';
 import type { FinishedSync } from './sync-outcome';
 
 interface InspectionDB extends DBSchema {
@@ -96,6 +97,26 @@ export async function saveRecord(record: LocalRecord) {
   const db = await open();
   const tx = db.transaction('records', 'readwrite', { durability: 'strict' });
   await Promise.all([tx.store.add(record), tx.done]);
+}
+
+export async function saveCorrection(input: {
+  authorId: UserId;
+  rootId: InspectionId;
+  basedOn: InspectionId;
+  edit: InspectionEdit;
+}) {
+  const db = await open();
+  const tx = db.transaction('records', 'readwrite', { durability: 'strict' });
+  const stored = await tx.store.index('byAuthor').getAll(input.authorId);
+  const [chain] = groupRecords(stored.map(parseLocalRecord).filter(({ payload }) => payload.rootId === input.rootId));
+  if (!chain || chain.latest.id !== input.basedOn) {
+    await tx.done;
+    throw new Error('다른 화면에서 기록이 바뀌었습니다. 최신 내용을 확인한 뒤 다시 시도하세요.');
+  }
+
+  const record = createCorrection({ chain, id: crypto.randomUUID(), edit: input.edit });
+  await Promise.all([tx.store.add(record), tx.done]);
+  return record;
 }
 
 export async function finishPendingRecord(id: InspectionId, authorId: UserId, sync: FinishedSync) {

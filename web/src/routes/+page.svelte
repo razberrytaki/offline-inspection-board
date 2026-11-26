@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { onMount, tick } from 'svelte';
-  import AttentionDetails from '$lib/AttentionDetails.svelte';
+  import RecordChain from '$lib/RecordChain.svelte';
+  import { groupRecords, type InspectionEdit } from '$lib/corrections';
   import InspectionForm from '$lib/InspectionForm.svelte';
   import {
     createRecord, parseEquipmentList, parseUser,
@@ -8,11 +10,10 @@
   } from '$lib/model';
   import {
     beginLogout, cacheUser, completeLogout, deleteAttentionRecord, readEquipment, readRecords, readSession,
-    replaceEquipment, saveRecord
+    replaceEquipment, saveCorrection, saveRecord
   } from '$lib/storage';
   import { createSync } from '$lib/sync';
   import { observeValidation } from '$lib/validation';
-  import './app.css';
 
   let user = $state<User | null>(null);
   let equipment = $state<Equipment[]>([]);
@@ -22,6 +23,7 @@
   let busy = $state(false);
   let opening = $state(true);
   let retryQueued = false;
+  let mounted = false;
   let sessionExpired = $state(false);
   let sendingId = $state<InspectionId | null>(null);
   const sync = createSync({
@@ -41,13 +43,11 @@
   let pendingCount = $derived(records.filter((item) => item.sync.kind === 'pending').length);
   let equipmentNames = $derived(new Map(equipment.map(({ id, name }) => [id, name])));
   const dateTime = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
-  const syncLabels: Record<'pending' | 'synced', string> = {
-    pending: '전송 대기',
-    synced: '동기화 완료'
-  };
+  let chains = $derived(groupRecords(records));
   const connectionLabels = { checking: '확인 중', online: '온라인', offline: '오프라인' };
 
   onMount(() => {
+    mounted = true;
     const stopValidation = observeValidation((message) => { validationMessage = message; });
     retryConnection();
     void checkPersistence();
@@ -55,6 +55,7 @@
     document.addEventListener('visibilitychange', syncWhenVisible);
     window.addEventListener('offline', retryConnection);
     return () => {
+      mounted = false;
       stopValidation();
       sync.setAuthor(null);
       window.removeEventListener('online', reconnect);
@@ -117,11 +118,13 @@
     } finally {
       busy = false;
       opening = false;
-      sync.setAuthor(sessionExpired ? null : user?.userId ?? null);
-      sync.trigger();
-      if (retryQueued) {
-        retryQueued = false;
-        retryConnection();
+      if (mounted) {
+        sync.setAuthor(sessionExpired ? null : user?.userId ?? null);
+        sync.trigger();
+        if (retryQueued) {
+          retryQueued = false;
+          retryConnection();
+        }
       }
     }
   }
@@ -165,18 +168,23 @@
   async function loadAccount(cachedUser: User | null) {
     const response = await request('/api/me');
     if (response === null) {
-      await showUser(cachedUser);
+      if (cachedUser?.role === 'supervisor') await goto('/board', { replaceState: true });
+      else await showUser(cachedUser);
       return;
     }
     if (response.status === 401) {
-      await showUser(cachedUser);
-      if (cachedUser) expireSession();
+      await showUser(cachedUser?.role === 'worker' ? cachedUser : null);
+      if (cachedUser?.role === 'worker') expireSession();
       return;
     }
     if (response.status !== 200) throw new Error('로그인 상태를 확인하지 못했습니다.');
 
     const account = parseUser(readJSON(response.body));
     await cacheUser(account);
+    if (account.role === 'supervisor') {
+      await goto('/board', { replaceState: true });
+      return;
+    }
     await showUser(account);
 
     const catalog = await request('/api/equipment');
@@ -248,6 +256,29 @@
       return true;
     } catch {
       if (user?.userId === authorId) error = '기기에 점검을 저장하지 못했습니다. 다시 시도하세요.';
+      return false;
+    }
+  }
+
+  async function correct(latest: LocalRecord, edit: InspectionEdit) {
+    if (user?.userId !== latest.authorId || sessionExpired) return false;
+    const { authorId, id: basedOn, payload: { rootId } } = latest;
+    saved = false;
+    error = '';
+    try {
+      const record = await saveCorrection({ authorId, rootId, basedOn, edit });
+      if (user?.userId === authorId) {
+        if (!records.some(({ id }) => id === record.id)) records = [...records, record];
+        saved = true;
+        sync.trigger();
+      }
+      return true;
+    } catch (cause) {
+      if (user?.userId === authorId) {
+        error = cause instanceof Error && cause.name === 'Error'
+          ? cause.message : '기기에 정정을 저장하지 못했습니다. 다시 시도하세요.';
+        sync.trigger();
+      }
       return false;
     }
   }
@@ -350,25 +381,12 @@
       {#if !sessionExpired}<InspectionForm {equipment} {save} />{/if}
       <section class="panel" aria-labelledby="records-heading">
         <h2 id="records-heading" bind:this={recordsHeading} tabindex="-1">내 기록</h2>
-        {#if records.length}
+        {#if chains.length}
           <ul class="records">
-            {#each records as record (record.id)}
-              {@const { equipmentId, inspectedAt, memo, result } = record.payload}
+            {#each chains as chain (chain.latest.payload.rootId)}
               <li>
-                <div class="record-heading">
-                  <strong>{equipmentId} {equipmentNames.get(equipmentId) ?? ''}</strong>
-                  {#if record.sync.kind !== 'needs_attention'}
-                    <span class="record-state" aria-live="polite">{record.id === sendingId && record.sync.kind === 'pending' ? '전송 중' : syncLabels[record.sync.kind]}</span>
-                  {/if}
-                </div>
-                <p>{result === 'normal' ? '정상' : '이상'} · <time datetime={new Date(inspectedAt).toISOString()}>{dateTime.format(inspectedAt)}</time></p>
-                {#if memo}<p class="record-memo">{memo}</p>{/if}
-                {#if record.sync.kind === 'needs_attention'}
-                  <div class="attention-details">
-                    <AttentionDetails {record} attention={record.sync} {equipmentNames} {dateTime}
-                      canResubmit={!sessionExpired} resubmit={() => resubmit(record)} remove={() => remove(record)} />
-                  </div>
-                {/if}
+                <RecordChain {chain} {equipmentNames} {dateTime} {sendingId} {sessionExpired}
+                  {correct} {resubmit} {remove} />
               </li>
             {/each}
           </ul>

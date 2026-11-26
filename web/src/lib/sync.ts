@@ -2,6 +2,14 @@ import type { InspectionId, LocalRecord, UserId } from './model';
 import { finishPendingRecord, readRecords, readSession } from './storage';
 import { classifyPut, retryDelay, type PutOutcome } from './sync-outcome';
 
+export function pendingInSendOrder(records: LocalRecord[]): LocalRecord[] {
+  return records.filter(({ sync }) => sync.kind === 'pending').sort((a, b) =>
+    a.payload.inspectedAt - b.payload.inspectedAt ||
+    a.payload.rootId.localeCompare(b.payload.rootId) ||
+    a.payload.revision - b.payload.revision
+  );
+}
+
 async function put(record: LocalRecord, signal: AbortSignal): Promise<PutOutcome> {
   const timeout = AbortSignal.timeout(8000);
   try {
@@ -65,9 +73,7 @@ export function createSync(view: {
     if (signal.aborted) return;
     view.records(records);
 
-    const pending = records.filter(({ sync }) => sync.kind === 'pending').sort((a, b) =>
-      a.payload.inspectedAt - b.payload.inspectedAt || a.id.localeCompare(b.id)
-    );
+    const pending = pendingInSendOrder(records);
 
     for (const record of pending) {
       const cached = await readSession();

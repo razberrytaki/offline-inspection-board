@@ -35,7 +35,7 @@ export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isText(value: unknown): value is string {
+export function isText(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0 && !value.includes('\u0000');
 }
 
@@ -47,7 +47,7 @@ export function isEquipmentId(value: unknown): value is EquipmentId {
   return isText(value);
 }
 
-function isInspectionId(value: unknown): value is InspectionId {
+export function isInspectionId(value: unknown): value is InspectionId {
   return typeof value === 'string' && value.length === 36 &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
@@ -88,12 +88,12 @@ export function parseEquipmentList(value: unknown): Equipment[] {
   });
 }
 
-function parsePayload(value: unknown, id: InspectionId): Payload {
+export function parsePayload(value: unknown, id?: InspectionId): Payload {
   if (!isObject(value)) throw new Error('점검 내용 형식이 올바르지 않습니다.');
   const { rootId, revision, equipmentId, result, memo, inspectedAt } = value;
   if (!isInspectionId(rootId) || typeof revision !== 'number' ||
       !Number.isInteger(revision) || revision < 0 || revision > 2_147_483_647 ||
-      (revision === 0) !== (rootId.toLowerCase() === id.toLowerCase()) ||
+      (id !== undefined && (revision === 0) !== (rootId.toLowerCase() === id.toLowerCase())) ||
       !isEquipmentId(equipmentId) || !isResult(result) || typeof memo !== 'string' ||
       memo.includes('\u0000') || (result === 'abnormal' && !memo.trim()) || !isTimestamp(inspectedAt)) {
     throw new Error('점검 내용 형식이 올바르지 않습니다.');
