@@ -107,6 +107,7 @@ pnpm -C web dev   # 다른 터미널, /api는 Go 서버로 넘김
 - 서비스 워커까지 확인하려면 `pnpm -C web build` 후 Go 서버 주소(`http://localhost:8080`)를 연다. Go 서버는 `STATIC_DIR`(기본값 `web/build`)의 파일을 서빙한다.
 - `scripts/build.sh`는 화면 파일을 넣은 단일 바이너리 `bin/oib`를 만든다(`-tags embed`).
 - 테스트는 실행할 때마다 임시 DB를 만들고 지운다. 접속 주소는 `TEST_DATABASE_URL`로 바꿀 수 있다. Playwright 서버 포트는 `E2E_PORT`(기본값 18091)다.
+- CI는 위 테스트와 Docker 이미지 빌드에 더해 gitleaks로 이력 전체의 비밀값을, Socket Firewall로 웹 의존성 설치를 검사한다.
 
 ## 한계
 
