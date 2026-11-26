@@ -32,9 +32,9 @@ func run() error {
 	if addr == "" {
 		addr = ":8080"
 	}
-	staticDir := os.Getenv("STATIC_DIR")
-	if staticDir == "" {
-		staticDir = "web/build"
+	files, err := staticFiles()
+	if err != nil {
+		return err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -47,7 +47,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           appHandler(routes(pool, &board.Hub{}, 15*time.Second), staticDir),
+		Handler:           appHandler(routes(pool, &board.Hub{}, 15*time.Second), files),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	if faultsEnabled() {

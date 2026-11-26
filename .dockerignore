@@ -1,0 +1,10 @@
+.git
+**/node_modules
+**/.svelte-kit
+/web/build
+/web/test-results
+/web/playwright-report
+/bin
+**/.env
+**/.env.*
+/server

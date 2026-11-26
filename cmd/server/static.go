@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path"
@@ -9,7 +11,7 @@ import (
 
 const spaFallback = "200.html"
 
-func appHandler(api http.Handler, staticDir string) http.Handler {
+func appHandler(api http.Handler, files fs.FS) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/api", api)
 	mux.Handle("/api/", api)
@@ -20,29 +22,39 @@ func appHandler(api http.Handler, staticDir string) http.Handler {
 			return
 		}
 		name := strings.TrimPrefix(r.URL.Path, "/")
-		if !strings.HasSuffix(r.URL.Path, "/") && serveAsset(w, r, staticDir, name) {
+		if !strings.HasSuffix(r.URL.Path, "/") && serveAsset(w, r, files, name) {
 			return
 		}
-		if !serveAsset(w, r, staticDir, spaFallback) {
+		if !serveAsset(w, r, files, spaFallback) {
 			http.NotFound(w, r)
 		}
 	})
 	return mux
 }
 
-func serveAsset(w http.ResponseWriter, r *http.Request, dir, name string) bool {
-	file, err := os.OpenInRoot(dir, name)
+type staticDirectory string
+
+func (dir staticDirectory) Open(name string) (fs.File, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
+	}
+	return os.OpenInRoot(string(dir), name)
+}
+
+func serveAsset(w http.ResponseWriter, r *http.Request, files fs.FS, name string) bool {
+	file, err := files.Open(name)
 	if err != nil {
 		return false
 	}
 	defer file.Close()
+	content, seekable := file.(io.ReadSeeker)
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil || !seekable || !info.Mode().IsRegular() {
 		return false
 	}
 	if name == spaFallback {
 		w.Header().Set("Cache-Control", "no-cache")
 	}
-	http.ServeContent(w, r, path.Base(name), info.ModTime(), file)
+	http.ServeContent(w, r, path.Base(name), info.ModTime(), content)
 	return true
 }

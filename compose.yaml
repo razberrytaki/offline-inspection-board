@@ -9,6 +9,22 @@ services:
       - "127.0.0.1:5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:dev@postgres:5432/oib?sslmode=disable
+      FAULT_INJECTION: "1"
+    ports:
+      - "127.0.0.1:8080:8080"
 
 volumes:
   postgres-data:

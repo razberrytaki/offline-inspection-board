@@ -24,7 +24,7 @@ func TestStaticFilesAndSPAFallback(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	handler := appHandler(routes(testPool, &board.Hub{}, time.Second), dir)
+	handler := appHandler(routes(testPool, &board.Hub{}, time.Second), staticDirectory(dir))
 	for _, tc := range []struct {
 		path, content string
 		status        int
@@ -50,7 +50,7 @@ func TestStaticFilesAndSPAFallback(t *testing.T) {
 
 func TestAppWithoutFrontendBuild(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "build")
-	handler := appHandler(routes(testPool, &board.Hub{}, time.Second), dir)
+	handler := appHandler(routes(testPool, &board.Hub{}, time.Second), staticDirectory(dir))
 	for path, want := range map[string]int{"/": http.StatusNotFound, "/api/me": http.StatusUnauthorized} {
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
