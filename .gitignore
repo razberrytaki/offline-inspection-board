@@ -1,0 +1,23 @@
+# Go
+/server
+/bin/
+*.test
+*.out
+coverage.*
+
+# 프론트엔드 (web/)
+node_modules/
+.svelte-kit/
+/web/build/
+
+# 로컬 환경
+.env
+.env.*
+!.env.example
+*.local
+
+# 편집기와 OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
