@@ -1,5 +1,7 @@
 # 오프라인 현장 점검 보드
 
+[![CI](https://github.com/razberrytaki/offline-inspection-board/actions/workflows/ci.yml/badge.svg)](https://github.com/razberrytaki/offline-inspection-board/actions/workflows/ci.yml)
+
 통신이 안 되는 현장에서 설비 점검을 기록하고, 연결이 돌아오면 감독자 보드에 바로 뜨는 웹 앱이다. Go와 SvelteKit으로 만들었다.
 
 ## 문제의식
