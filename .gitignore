@@ -9,6 +9,8 @@ coverage.*
 node_modules/
 .svelte-kit/
 /web/build/
+/web/test-results/
+/web/playwright-report/
 
 # 로컬 환경
 .env

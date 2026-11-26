@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ESNext",
+    "lib": ["ESNext", "WebWorker"],
+    "types": ["@sveltejs/kit"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "files": ["src/service-worker.ts"]
+}

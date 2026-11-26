@@ -1,0 +1,30 @@
+{
+  "name": "offline-inspection-board-web",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.23.0",
+  "scripts": {
+    "dev": "vite",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.worker.json",
+    "build": "vite build",
+    "test": "vitest run",
+    "test:e2e": "pnpm build && playwright test -c tests/playwright.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@sveltejs/adapter-static": "^3.0.11",
+    "@sveltejs/kit": "^2.70.4",
+    "@sveltejs/vite-plugin-svelte": "^7.3.2",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
+    "svelte": "^5.59.2",
+    "svelte-check": "^4.7.8",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
+    "vitest": "^4.1.12"
+  },
+  "dependencies": {
+    "idb": "^8.0.4"
+  }
+}

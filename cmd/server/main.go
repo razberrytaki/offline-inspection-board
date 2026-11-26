@@ -32,6 +32,10 @@ func run() error {
 	if addr == "" {
 		addr = ":8080"
 	}
+	staticDir := os.Getenv("STATIC_DIR")
+	if staticDir == "" {
+		staticDir = "web/build"
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	pool, err := db.Open(ctx, databaseURL)
@@ -43,7 +47,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           routes(pool, &board.Hub{}, 15*time.Second),
+		Handler:           appHandler(routes(pool, &board.Hub{}, 15*time.Second), staticDir),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	slog.Info("서버 시작", "addr", addr)
@@ -56,10 +60,13 @@ func routes(pool *pgxpool.Pool, hub *board.Hub, heartbeatInterval time.Duration)
 	inspections := inspection.Handler{Store: inspection.Store{Pool: pool}, Board: boards}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /session", sessions.Login)
-	mux.Handle("PUT /inspections/{id}", sessions.Require(http.HandlerFunc(inspections.Put)))
-	mux.Handle("GET /board", sessions.RequireRole("supervisor", http.HandlerFunc(boards.List)))
-	mux.Handle("GET /board/{rootId}", sessions.RequireRole("supervisor", http.HandlerFunc(boards.Detail)))
-	mux.Handle("GET /board/events", sessions.RequireRole("supervisor", http.HandlerFunc(boards.Events)))
+	mux.HandleFunc("POST /api/session", sessions.Login)
+	mux.HandleFunc("POST /api/session/logout", sessions.Logout)
+	mux.Handle("GET /api/me", sessions.Require(http.HandlerFunc(auth.Me)))
+	mux.Handle("GET /api/equipment", sessions.Require(listEquipment(pool)))
+	mux.Handle("PUT /api/inspections/{id}", sessions.Require(http.HandlerFunc(inspections.Put)))
+	mux.Handle("GET /api/board", sessions.RequireRole("supervisor", http.HandlerFunc(boards.List)))
+	mux.Handle("GET /api/board/{rootId}", sessions.RequireRole("supervisor", http.HandlerFunc(boards.Detail)))
+	mux.Handle("GET /api/board/events", sessions.RequireRole("supervisor", http.HandlerFunc(boards.Events)))
 	return mux
 }

@@ -11,11 +11,19 @@
 - **보드 정렬** — 최근 서버 접수순으로 표시한다. 뒤늦게 동기화된 점검도 처음 접수된 시점에 목록 상단에 나타난다. 정정이 처음 접수되면 기존 행을 위로 올린다. 단순 재전송은 행 수와 순서에 영향을 주지 않는다. 현장 점검 시각과 서버 접수 시각은 따로 보존한다.
 - **계정과 공용 기기** — 미리 넣어 둔 데모 계정만 쓴다. 직원 2명과 감독자 1명이다. 회원가입은 없다. 기기는 기록마다 작성자를 저장하고, 현재 로그인한 사용자의 기록만 전송한다. 다른 직원이 같은 기기에 로그인해도 남의 기록이 그 직원 이름으로 접수되지 않는다. 세션 유효 기간은 근무 한 번보다 길게 잡는다.
 
+## 세션과 설비 API
+
+- `POST /api/session`은 `{userId, password}`를 받아 세션 쿠키를 설정한다.
+- `GET /api/me`는 현재 사용자의 `{userId, name, role}`을 반환한다.
+- `GET /api/equipment`는 로그인한 모든 사용자에게 폐기되지 않은 설비의 `[{id, name}]` 목록을 반환한다.
+- `POST /api/session/logout`은 세션을 삭제하고 쿠키를 만료시킨다.
+- 감독자 API는 `GET /api/board`, `GET /api/board/{rootId}`, `GET /api/board/events`다.
+
 ## 동기화 API
 
 백엔드는 Go, 프론트엔드는 Svelte를 사용한다. 직원 기기가 점검 ID를 생성하고, 첫 전송 전에 ID와 확정된 내용을 함께 저장한다. 앱을 다시 열거나 통신이 복구되면 같은 ID와 내용으로 건별 전송한다. Safari에는 Background Sync가 없으므로 앱이 닫혀 있는 동안의 전송은 약속하지 않는다.
 
-| PUT /inspections/{id} 처리 상황 | 서버 응답 | 직원 화면 |
+| PUT /api/inspections/{id} 처리 상황 | 서버 응답 | 직원 화면 |
 |---|---|---|
 | 새 ID를 처음 저장함 | 저장을 확정한 뒤 201 Created와 점검 ID, 접수 시각 반환 | 동기화 완료 |
 | 같은 ID와 같은 내용이 이미 저장됨 | 200 OK와 기존 ID 및 최초 접수 시각 반환 | 동기화 완료 |
@@ -86,7 +94,7 @@ PUT 처리는 트랜잭션 하나에서 먼저 ID로 기존 기록을 찾고, �
 
 ## 제안한 구현과 화면 구성
 
-- **저장과 전송** — Go의 net/http, pgx, PostgreSQL을 사용한다. 프론트엔드는 SvelteKit을 adapter-static으로 빌드하고 Go 바이너리에 `go:embed`로 넣는다. 서비스 워커는 SvelteKit의 `$service-worker` 모듈로 빌드 파일을 미리 받아 두고 오프라인에서 화면을 다시 연다. IndexedDB는 `idb` 래퍼로 다루며 설비 목록과 기록을 보관한다.
+- **저장과 전송** — Go의 net/http, pgx, PostgreSQL을 사용한다. 프론트엔드는 SvelteKit을 adapter-static으로 빌드하고 Go 서버가 `STATIC_DIR`(기본값 `web/build`)에서 제공한다. 서비스 워커는 SvelteKit의 `$service-worker` 모듈로 빌드 파일을 미리 받아 두고 오프라인에서 화면을 다시 연다. IndexedDB는 `idb` 래퍼로 다루며 설비 목록과 기록을 보관한다.
 - **기기 저장소 보존** — 첫 실행에 `navigator.storage.persist()`를 요청한다. iOS Safari는 홈 화면에 추가하지 않은 사이트의 저장소를 7일 동안 방문이 없으면 지울 수 있다. 요청이 거절되면 경고와 ‘홈 화면에 추가’ 안내를 표시한다.
 - **HTTPS** — 서비스 워커와 `crypto.randomUUID()`는 HTTPS나 localhost에서만 동작한다. 실제 휴대폰으로 데모하려면 HTTPS 터널이나 mkcert 인증서를 쓴다.
 - **현장 점검** — 연결 상태, 저장된 설비 수, 마지막 목록 갱신 시각, 전송 대기 건수를 보여준다. 연결 상태는 `navigator.onLine`이 아니라 마지막 요청의 성공 여부로 판단한다. 설비를 선택한 뒤 결과와 메모를 입력한다. 기기 저장 직후와 서버 접수 후의 상태를 구분한다.
@@ -113,8 +121,34 @@ PUT 처리는 트랜잭션 하나에서 먼저 ID로 기존 기록을 찾고, �
 2. 연결 복구 후 서버가 점검을 저장한 직후 응답을 끊는다. 재시도하면 기기에 동기화 완료가 표시되고, 감독자 보드에는 새로고침 없이 점검 한 건만 나타난다.
 3. 최초 작성자가 메모를 정정하면 원본을 보존한 채 보드의 기존 행이 맨 위로 이동한다. 같은 정정을 재전송해도 이력과 접수 시각이 그대로 유지된다.
 
+## 개발 실행과 테스트
+
+Go와 Node.js 24 이상, pnpm 12, PostgreSQL 17이 필요하다. 로컬 DB가 없다면 `docker compose up -d postgres`로 준비한다. 저장소 루트에서 다음 명령을 실행한다.
+
+```sh
+pnpm -C web install --frozen-lockfile
+export DATABASE_URL='postgres://postgres:dev@127.0.0.1:5433/oib?sslmode=disable'
+go run ./cmd/server
+```
+
+다른 터미널에서 `pnpm -C web dev`를 실행하고 Vite가 출력한 주소를 연다. Vite는 `/api` 요청을 Go 서버의 기본 포트 8080으로 보내며, `API_PROXY_TARGET`으로 대상 주소를 바꿀 수 있다. 데모 계정은 `worker-1`, `worker-2`, `supervisor`이고 비밀번호는 각 아이디 앞에 `demo-`를 붙인 값이다.
+
+오프라인 동작을 직접 확인하려면 `pnpm -C web build` 후 Go 서버 주소(기본값 `http://127.0.0.1:8080`)를 연다. 처음에는 온라인 상태로 로그인해 설비 목록을 받은 뒤 서비스 워커가 활성화될 때까지 기다린다.
+
+```sh
+go vet ./...
+go test -race -count=1 ./...
+pnpm -C web check
+pnpm -C web test
+pnpm -C web build
+pnpm -C web exec playwright install chromium
+pnpm -C web test:e2e
+```
+
+Go와 Playwright 통합 테스트는 각각 임시 DB를 만들고 종료할 때 삭제한다. 테스트용 접속 주소는 `TEST_DATABASE_URL`로 바꿀 수 있으며 지정한 계정에 DB 생성 권한이 있어야 한다. Playwright는 빌드된 앱을 18091번 포트의 Go 서버에서 실행한다. 포트를 변경하려면 `E2E_PORT`를 설정한다.
+
 ## 검증 방법
 
-- 세 인수 기준은 Playwright E2E 테스트로 자동화한다. 오프라인은 `context.setOffline()`으로 만든다.
-- 2번 기준의 응답 끊기는 개발 모드 전용 Go 미들웨어로 만든다. 토글이 켜져 있으면 커밋 후 `http.Hijacker`로 연결을 닫는다. 장애 패널도 같은 미들웨어를 쓴다.
+- 현재 앱은 인수 기준 1을 구현한다. Playwright는 `context.setOffline(true)`로 연결을 끊고 저장한 점검이 다시 열어도 전송 대기로 표시되는지 확인한다. 공용 기기에서의 기록 분리와 이상 결과의 메모 검증도 확인한다.
+- 인수 기준 2와 3의 화면과 전송 흐름은 이후 작업이다. 2번 기준의 응답 끊기는 개발 모드 전용 Go 미들웨어로 만들 예정이다. 토글이 켜져 있으면 커밋 후 `http.Hijacker`로 연결을 닫는다. 장애 패널도 같은 미들웨어를 쓴다.
 - 동시성은 Go 테스트로 검증한다. 같은 PUT 50개를 동시에 보내고 행 1개와 알림 1개를 확인한다.

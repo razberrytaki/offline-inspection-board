@@ -143,7 +143,7 @@ func (r response) conflict(t *testing.T, reason string) json.RawMessage {
 func (a api) login(t *testing.T, userID string) *http.Cookie {
 	t.Helper()
 	body := fmt.Sprintf(`{"userId":%q,"password":%q}`, userID, "demo-"+userID)
-	res, err := a.Client().Post(a.URL+"/session", "application/json", strings.NewReader(body))
+	res, err := a.Client().Post(a.URL+"/api/session", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func (a api) login(t *testing.T, userID string) *http.Cookie {
 }
 
 func (a api) put(ctx context.Context, cookie *http.Cookie, id, body string) (response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, a.URL+"/inspections/"+id, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, a.URL+"/api/inspections/"+id, strings.NewReader(body))
 	if err != nil {
 		return response{}, err
 	}

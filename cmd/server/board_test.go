@@ -41,7 +41,7 @@ func (a api) get(t *testing.T, cookie *http.Cookie, path string) response {
 
 func (a api) list(t *testing.T, supervisor *http.Cookie, query string) []board.Row {
 	t.Helper()
-	res := a.get(t, supervisor, "/board"+query)
+	res := a.get(t, supervisor, "/api/board"+query)
 	res.expect(t, http.StatusOK)
 	var rows []board.Row
 	if err := json.Unmarshal(res.body, &rows); err != nil || rows == nil {
@@ -115,7 +115,7 @@ func TestBoardAbnormalFilter(t *testing.T) {
 		t.Fatalf("전체 필터에 정정한 점검이 없다: %+v", rows)
 	}
 	for _, query := range []string{"?filter=normal", "?filter=", "?filter=all&filter=abnormal"} {
-		a.get(t, supervisor, "/board"+query).expect(t, http.StatusUnprocessableEntity)
+		a.get(t, supervisor, "/api/board"+query).expect(t, http.StatusUnprocessableEntity)
 	}
 }
 
@@ -136,7 +136,7 @@ func TestBoardDetail(t *testing.T) {
 		{firstID, pumpRow(rootID, 1, "abnormal", "누수", first.ReceivedAt)},
 		{latestID, pumpRow(rootID, 2, "normal", "", latest.ReceivedAt)},
 	}
-	res := a.get(t, supervisor, "/board/"+rootID)
+	res := a.get(t, supervisor, "/api/board/"+rootID)
 	res.expect(t, http.StatusOK)
 	var detail struct {
 		Current board.Row  `json:"current"`
@@ -147,14 +147,14 @@ func TestBoardDetail(t *testing.T) {
 		t.Fatalf("보드 상세 응답 불일치: %s (%v)", res.body, err)
 	}
 	for _, id := range []string{uuid.NewString(), "invalid", firstID} {
-		a.get(t, supervisor, "/board/"+id).expect(t, http.StatusNotFound)
+		a.get(t, supervisor, "/api/board/"+id).expect(t, http.StatusNotFound)
 	}
 }
 
 func TestBoardAccess(t *testing.T) {
 	a := startAPI(t)
 	worker := a.login(t, "worker-1")
-	for _, path := range []string{"/board", "/board/" + uuid.NewString(), "/board/events"} {
+	for _, path := range []string{"/api/board", "/api/board/" + uuid.NewString(), "/api/board/events"} {
 		t.Run(path, func(t *testing.T) {
 			a.get(t, worker, path).expect(t, http.StatusForbidden)
 			a.get(t, nil, path).expect(t, http.StatusUnauthorized)
@@ -166,7 +166,7 @@ func (a api) openBoardStream(t *testing.T, supervisor *http.Cookie) *bufio.Reade
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	t.Cleanup(cancel)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL+"/board/events", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL+"/api/board/events", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,11 +22,24 @@ type Sessions struct {
 	Pool *pgxpool.Pool
 }
 
-type userIDKey struct{}
+type userKey struct{}
+
+type User struct {
+	ID   string `json:"userId"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
 
 func UserID(ctx context.Context) string {
-	id, _ := ctx.Value(userIDKey{}).(string)
-	return id
+	user, _ := ctx.Value(userKey{}).(User)
+	return user.ID
+}
+
+func Me(w http.ResponseWriter, r *http.Request) {
+	user, _ := r.Context().Value(userKey{}).(User)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(user)
 }
 
 func (s Sessions) Login(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +92,20 @@ func (s Sessions) Login(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s Sessions) Logout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(cookieName); err == nil {
+		if _, err := s.Pool.Exec(r.Context(), "DELETE FROM sessions WHERE token = $1", cookie.Value); err != nil {
+			sessionError(w, err)
+			return
+		}
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: cookieName, Path: "/", MaxAge: -1, Expires: time.Unix(0, 0),
+		HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s Sessions) Require(next http.Handler) http.Handler {
 	return s.require("", next)
 }
@@ -94,21 +121,21 @@ func (s Sessions) require(role string, next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		var userID, userRole string
+		var user User
 		err = s.Pool.QueryRow(r.Context(), `
-			SELECT u.id, u.role
+			SELECT u.id, u.name, u.role
 			FROM sessions s JOIN users u ON u.id = s.user_id
 			WHERE s.token = $1 AND s.expires_at > now()
-		`, cookie.Value).Scan(&userID, &userRole)
+		`, cookie.Value).Scan(&user.ID, &user.Name, &user.Role)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			w.WriteHeader(http.StatusUnauthorized)
 		case err != nil:
 			sessionError(w, err)
-		case role != "" && userRole != role:
+		case role != "" && user.Role != role:
 			w.WriteHeader(http.StatusForbidden)
 		default:
-			ctx := context.WithValue(r.Context(), userIDKey{}, userID)
+			ctx := context.WithValue(r.Context(), userKey{}, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		}
 	})
