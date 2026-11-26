@@ -1,8 +1,9 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import {
-  type Equipment, type LocalRecord, type User, type UserId,
+  type Equipment, type InspectionId, type LocalRecord, type User, type UserId,
   isTimestamp, parseEquipmentList, parseLocalRecord, parseUser
 } from './model';
+import type { FinishedSync } from './sync-outcome';
 
 interface InspectionDB extends DBSchema {
   equipment: { key: string; value: unknown };
@@ -95,4 +96,35 @@ export async function saveRecord(record: LocalRecord) {
   const db = await open();
   const tx = db.transaction('records', 'readwrite', { durability: 'strict' });
   await Promise.all([tx.store.add(record), tx.done]);
+}
+
+export async function finishPendingRecord(id: InspectionId, authorId: UserId, sync: FinishedSync) {
+  const db = await open();
+  const tx = db.transaction('records', 'readwrite');
+  const value = await tx.store.get(id);
+  const record = value === undefined ? undefined : parseLocalRecord(value);
+  if (record?.authorId === authorId && record.sync.kind === 'pending') {
+    const updated = { ...record, sync };
+    await Promise.all([tx.store.put(updated), tx.done]);
+    return updated;
+  }
+  await tx.done;
+  return record?.authorId === authorId ? record : undefined;
+}
+
+export async function deleteAttentionRecord(id: InspectionId, authorId: UserId) {
+  const db = await open();
+  const tx = db.transaction('records', 'readwrite', { durability: 'strict' });
+  const value = await tx.store.get(id);
+  if (value !== undefined) {
+    const record = parseLocalRecord(value);
+    if (record.authorId !== authorId || record.sync.kind !== 'needs_attention') {
+      await tx.done;
+      return false;
+    }
+    await Promise.all([tx.store.delete(id), tx.done]);
+  } else {
+    await tx.done;
+  }
+  return true;
 }

@@ -15,13 +15,14 @@ type Payload = {
   inspectedAt: number;
 };
 
-type ServerRecord = Payload & { id: InspectionId; authorId: UserId; receivedAt: string };
+export type ServerRecord = Payload & { id: InspectionId; authorId: UserId; receivedAt: string };
 
-type SyncState =
+export type ConflictReason = 'content_mismatch' | 'revision_taken' | 'missing_previous';
+export type AttentionReason = ConflictReason | 'forbidden' | 'invalid';
+export type SyncState =
   | { kind: 'pending' }
   | { kind: 'synced'; receivedAt: string }
-  | { kind: 'needs_attention'; reason: string; current?: ServerRecord }
-  | { kind: 'needs_login' };
+  | { kind: 'needs_attention'; reason: AttentionReason; current?: ServerRecord };
 
 export type LocalRecord = {
   id: InspectionId;
@@ -30,7 +31,7 @@ export type LocalRecord = {
   sync: SyncState;
 };
 
-function isObject(value: unknown): value is Record<string, unknown> {
+export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -60,7 +61,7 @@ export function isTimestamp(value: unknown): value is number {
     value >= -210_866_803_200_000 && value <= 8_640_000_000_000_000;
 }
 
-function isReceivedAt(value: unknown): value is string {
+export function isReceivedAt(value: unknown): value is string {
   return typeof value === 'string' &&
     /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d)$/.test(value) &&
     Number.isFinite(Date.parse(value));
@@ -100,7 +101,7 @@ function parsePayload(value: unknown, id: InspectionId): Payload {
   return { rootId, revision, equipmentId, result, memo, inspectedAt };
 }
 
-function parseServerRecord(value: unknown): ServerRecord {
+export function parseServerRecord(value: unknown): ServerRecord {
   if (!isObject(value) || !isInspectionId(value.id) ||
       !isUserId(value.authorId) || !isReceivedAt(value.receivedAt)) {
     throw new Error('서버 점검 기록 형식이 올바르지 않습니다.');
@@ -113,11 +114,14 @@ function parseServerRecord(value: unknown): ServerRecord {
   };
 }
 
+export function isConflictReason(value: unknown): value is ConflictReason {
+  return value === 'content_mismatch' || value === 'revision_taken' || value === 'missing_previous';
+}
+
 function parseSync(value: unknown): SyncState {
   if (isObject(value)) {
     switch (value.kind) {
       case 'pending':
-      case 'needs_login':
         return { kind: value.kind };
       case 'synced':
         if (isReceivedAt(value.receivedAt)) {
@@ -125,7 +129,7 @@ function parseSync(value: unknown): SyncState {
         }
         break;
       case 'needs_attention':
-        if (isText(value.reason)) {
+        if (isConflictReason(value.reason) || value.reason === 'forbidden' || value.reason === 'invalid') {
           return {
             kind: value.kind,
             reason: value.reason,

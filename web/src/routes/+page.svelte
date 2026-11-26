@@ -1,14 +1,16 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
+  import AttentionDetails from '$lib/AttentionDetails.svelte';
   import InspectionForm from '$lib/InspectionForm.svelte';
   import {
     createRecord, parseEquipmentList, parseUser,
-    type Equipment, type EquipmentId, type LocalRecord, type Result, type User
+    type Equipment, type EquipmentId, type InspectionId, type LocalRecord, type Result, type User
   } from '$lib/model';
   import {
-    beginLogout, cacheUser, completeLogout, readEquipment, readRecords, readSession,
+    beginLogout, cacheUser, completeLogout, deleteAttentionRecord, readEquipment, readRecords, readSession,
     replaceEquipment, saveRecord
   } from '$lib/storage';
+  import { createSync } from '$lib/sync';
   import { observeValidation } from '$lib/validation';
   import './app.css';
 
@@ -20,19 +22,28 @@
   let busy = $state(false);
   let opening = $state(true);
   let retryQueued = false;
+  let sessionExpired = $state(false);
+  let sendingId = $state<InspectionId | null>(null);
+  const sync = createSync({
+    sending: (id) => { sendingId = id; },
+    connection: (state) => { connection = state; },
+    records: (ownRecords) => { records = ownRecords; },
+    updated: (record) => { records = records.map((item) => item.id === record.id ? record : item); },
+    expired: expireSession,
+    error: () => { error = '기기의 전송 대기 기록을 처리하지 못했습니다. 자동으로 다시 시도합니다.'; }
+  });
 
   let persistenceWarning = $state(false);
   let error = $state('');
   let saved = $state(false);
   let validationMessage = $state('');
+  let recordsHeading: HTMLHeadingElement | undefined = $state();
   let pendingCount = $derived(records.filter((item) => item.sync.kind === 'pending').length);
   let equipmentNames = $derived(new Map(equipment.map(({ id, name }) => [id, name])));
   const dateTime = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
-  const syncLabels: Record<LocalRecord['sync']['kind'], string> = {
+  const syncLabels: Record<'pending' | 'synced', string> = {
     pending: '전송 대기',
-    synced: '동기화 완료',
-    needs_attention: '확인 필요',
-    needs_login: '다시 로그인 필요'
+    synced: '동기화 완료'
   };
   const connectionLabels = { checking: '확인 중', online: '온라인', offline: '오프라인' };
 
@@ -40,14 +51,31 @@
     const stopValidation = observeValidation((message) => { validationMessage = message; });
     retryConnection();
     void checkPersistence();
-    window.addEventListener('online', retryConnection);
+    window.addEventListener('online', reconnect);
+    document.addEventListener('visibilitychange', syncWhenVisible);
     window.addEventListener('offline', retryConnection);
     return () => {
       stopValidation();
-      window.removeEventListener('online', retryConnection);
+      sync.setAuthor(null);
+      window.removeEventListener('online', reconnect);
+      document.removeEventListener('visibilitychange', syncWhenVisible);
       window.removeEventListener('offline', retryConnection);
     };
   });
+
+  function reconnect() {
+    sync.trigger({ wake: true });
+    retryConnection();
+  }
+
+  function syncWhenVisible() {
+    if (document.visibilityState === 'visible') sync.trigger({ wake: true });
+  }
+
+  function expireSession() {
+    sync.setAuthor(null);
+    sessionExpired = true;
+  }
 
   async function checkPersistence() {
     try {
@@ -89,6 +117,8 @@
     } finally {
       busy = false;
       opening = false;
+      sync.setAuthor(sessionExpired ? null : user?.userId ?? null);
+      sync.trigger();
       if (retryQueued) {
         retryQueued = false;
         retryConnection();
@@ -97,6 +127,7 @@
   }
 
   function retryConnection() {
+    if (sessionExpired) return;
     if (busy) retryQueued = true;
     else void runSession(restoreSession);
   }
@@ -116,6 +147,7 @@
       return;
     }
 
+    sync.setAuthor(null);
     user = null;
     records = [];
     saved = false;
@@ -137,8 +169,8 @@
       return;
     }
     if (response.status === 401) {
-      await showUser(null);
-      await cacheUser(null);
+      await showUser(cachedUser);
+      if (cachedUser) expireSession();
       return;
     }
     if (response.status !== 200) throw new Error('로그인 상태를 확인하지 못했습니다.');
@@ -150,8 +182,7 @@
     const catalog = await request('/api/equipment');
     if (catalog === null) return;
     if (catalog.status === 401) {
-      await showUser(null);
-      await cacheUser(null);
+      expireSession();
       return;
     }
     if (catalog.status !== 200) throw new Error('설비 목록을 갱신하지 못했습니다.');
@@ -178,13 +209,16 @@
       if (response === null) return;
       if (response.status === 401) throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.');
       if (response.status !== 204) throw new Error('로그인하지 못했습니다.');
+      sessionExpired = false;
       await loadAccount(null);
     });
   }
 
   function logout() {
     void runSession(async () => {
+      sync.setAuthor(null);
       await beginLogout();
+      sessionExpired = false;
       await showUser(null);
       await finishLogout();
     });
@@ -198,22 +232,46 @@
     return true;
   }
 
-  async function save(input: { equipmentId: EquipmentId; result: Result; memo: string }) {
-    if (!user) return false;
+  async function save(input: { equipmentId: EquipmentId; result: Result; memo: string }, inspectedAt = Date.now()) {
+    if (!user || sessionExpired) return false;
     const authorId = user.userId;
     saved = false;
     error = '';
     try {
-      const record = createRecord({ ...input, id: crypto.randomUUID(), authorId, inspectedAt: Date.now() });
+      const record = createRecord({ ...input, id: crypto.randomUUID(), authorId, inspectedAt });
       await saveRecord(record);
       if (user?.userId === authorId) {
         records = [record, ...records];
         saved = true;
+        sync.trigger();
       }
       return true;
     } catch {
       if (user?.userId === authorId) error = '기기에 점검을 저장하지 못했습니다. 다시 시도하세요.';
       return false;
+    }
+  }
+
+  function resubmit(record: LocalRecord) {
+    if (user?.userId !== record.authorId || record.payload.revision !== 0) return Promise.resolve(false);
+    return save(record.payload, record.payload.inspectedAt);
+  }
+
+  async function remove(record: LocalRecord) {
+    if (user?.userId !== record.authorId) return;
+    error = '';
+    try {
+      if (!await deleteAttentionRecord(record.id, record.authorId)) {
+        error = '이 기록을 삭제할 수 없습니다. 화면을 다시 열어 상태를 확인하세요.';
+        return;
+      }
+      if (user?.userId === record.authorId) {
+        records = records.filter(({ id }) => id !== record.id);
+        await tick();
+        recordsHeading?.focus();
+      }
+    } catch {
+      error = '기기의 기록을 삭제하지 못했습니다. 다시 시도하세요.';
     }
   }
 </script>
@@ -256,9 +314,12 @@
 
   {#if opening}
     <p>로그인 상태를 확인하는 중입니다.</p>
-  {:else if !user}
+  {:else if !user || sessionExpired}
     <section class="panel login-panel" aria-labelledby="login-heading">
       <h2 id="login-heading">로그인</h2>
+      {#if sessionExpired}
+        <p role="status">다시 로그인 필요</p>
+      {/if}
       {#if connection === 'offline'}
         <p>로그인하려면 인터넷에 연결하세요.</p>
       {/if}
@@ -279,14 +340,16 @@
         <button type="submit" aria-disabled={busy}>{busy ? '확인 중…' : '로그인'}</button>
       </form>
     </section>
-  {:else}
-    {#if saved}
+  {/if}
+
+  {#if user && !opening}
+    {#if saved && !sessionExpired}
       <p class="notice saved">기기에 저장됨</p>
     {/if}
     <div class="workspace">
-      <InspectionForm {equipment} {save} />
+      {#if !sessionExpired}<InspectionForm {equipment} {save} />{/if}
       <section class="panel" aria-labelledby="records-heading">
-        <h2 id="records-heading">내 기록</h2>
+        <h2 id="records-heading" bind:this={recordsHeading} tabindex="-1">내 기록</h2>
         {#if records.length}
           <ul class="records">
             {#each records as record (record.id)}
@@ -294,10 +357,18 @@
               <li>
                 <div class="record-heading">
                   <strong>{equipmentId} {equipmentNames.get(equipmentId) ?? ''}</strong>
-                  <span class="record-state">{syncLabels[record.sync.kind]}</span>
+                  {#if record.sync.kind !== 'needs_attention'}
+                    <span class="record-state" aria-live="polite">{record.id === sendingId && record.sync.kind === 'pending' ? '전송 중' : syncLabels[record.sync.kind]}</span>
+                  {/if}
                 </div>
                 <p>{result === 'normal' ? '정상' : '이상'} · <time datetime={new Date(inspectedAt).toISOString()}>{dateTime.format(inspectedAt)}</time></p>
                 {#if memo}<p class="record-memo">{memo}</p>{/if}
+                {#if record.sync.kind === 'needs_attention'}
+                  <div class="attention-details">
+                    <AttentionDetails {record} attention={record.sync} {equipmentNames} {dateTime}
+                      canResubmit={!sessionExpired} resubmit={() => resubmit(record)} remove={() => remove(record)} />
+                  </div>
+                {/if}
               </li>
             {/each}
           </ul>

@@ -50,6 +50,10 @@ func run() error {
 		Handler:           appHandler(routes(pool, &board.Hub{}, 15*time.Second), staticDir),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	if faultsEnabled() {
+		// 브라우저가 재사용한 연결의 오류를 자체 재시도로 숨기지 않게 한다.
+		server.SetKeepAlivesEnabled(false)
+	}
 	slog.Info("서버 시작", "addr", addr)
 	return server.ListenAndServe()
 }
@@ -64,7 +68,13 @@ func routes(pool *pgxpool.Pool, hub *board.Hub, heartbeatInterval time.Duration)
 	mux.HandleFunc("POST /api/session/logout", sessions.Logout)
 	mux.Handle("GET /api/me", sessions.Require(http.HandlerFunc(auth.Me)))
 	mux.Handle("GET /api/equipment", sessions.Require(listEquipment(pool)))
-	mux.Handle("PUT /api/inspections/{id}", sessions.Require(http.HandlerFunc(inspections.Put)))
+	putInspection := sessions.Require(http.HandlerFunc(inspections.Put))
+	if faultsEnabled() {
+		faults := &inspectionFaults{}
+		mux.HandleFunc("POST /api/dev/faults", faults.configure)
+		putInspection = faults.wrap(putInspection)
+	}
+	mux.Handle("PUT /api/inspections/{id}", putInspection)
 	mux.Handle("GET /api/board", sessions.RequireRole("supervisor", http.HandlerFunc(boards.List)))
 	mux.Handle("GET /api/board/{rootId}", sessions.RequireRole("supervisor", http.HandlerFunc(boards.Detail)))
 	mux.Handle("GET /api/board/events", sessions.RequireRole("supervisor", http.HandlerFunc(boards.Events)))

@@ -52,6 +52,7 @@ describe('점검 기록', () => {
     expect(() => parseLocalRecord({ ...record, payload: { ...record.payload, revision: 1 } })).toThrow();
     expect(() => parseLocalRecord({ ...record, sync: { kind: 'synced', receivedAt: 0 } })).toThrow();
     expect(() => parseLocalRecord({ ...record, sync: { kind: 'sending' } })).toThrow();
+    expect(() => parseLocalRecord({ ...record, sync: { kind: 'needs_login' } })).toThrow();
   });
 });
 

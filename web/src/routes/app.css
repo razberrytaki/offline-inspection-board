@@ -93,3 +93,5 @@ button[aria-disabled='true'] { cursor: wait; }
 @media (max-width: 36rem) {
   .metrics { grid-template-columns: repeat(2, 1fr); }
 }
+
+.attention-details { margin-block-start: .55rem; }
