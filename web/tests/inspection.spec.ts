@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './fixtures';
 import { boardRow, openBoard } from './supervisor';
 import { inspectionPut, login, memo, ownRecords, pendingCount, readLocalRecords, savePump, selectAbnormalPump, submitPump } from './field';
 

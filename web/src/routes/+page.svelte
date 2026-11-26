@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { onMount, tick } from 'svelte';
+  import FaultPanel from '$lib/FaultPanel.svelte';
   import RecordChain from '$lib/RecordChain.svelte';
   import { groupRecords, type InspectionEdit } from '$lib/corrections';
   import InspectionForm from '$lib/InspectionForm.svelte';
@@ -376,6 +377,9 @@
   {#if user && !opening}
     {#if saved && !sessionExpired}
       <p class="notice saved">기기에 저장됨</p>
+    {/if}
+    {#if user.role === 'worker'}
+      <FaultPanel {records} {sessionExpired} checkConnection={reconnect} />
     {/if}
     <div class="workspace">
       {#if !sessionExpired}<InspectionForm {equipment} {save} />{/if}

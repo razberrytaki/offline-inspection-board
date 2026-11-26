@@ -29,9 +29,8 @@ try {
     cwd: root,
     env: {
       ...process.env,
-      ADDR: '127.0.0.1:' + (process.env.E2E_PORT ?? '18091'),
       DATABASE_URL: dbUrl.href,
-      FAULT_INJECTION: '1',
+      FAULT_INJECTION: process.env.E2E_DEMO === '1' ? '1' : undefined,
       STATIC_DIR: staticDir
     },
     stdio: 'inherit'

@@ -68,15 +68,9 @@ func routes(pool *pgxpool.Pool, hub *board.Hub, heartbeatInterval time.Duration)
 	mux.HandleFunc("POST /api/session/logout", sessions.Logout)
 	mux.Handle("GET /api/me", sessions.Require(http.HandlerFunc(auth.Me)))
 	mux.Handle("GET /api/equipment", sessions.Require(listEquipment(pool)))
-	putInspection := sessions.Require(http.HandlerFunc(inspections.Put))
-	if faultsEnabled() {
-		faults := &inspectionFaults{}
-		mux.HandleFunc("POST /api/dev/faults", faults.configure)
-		putInspection = faults.wrap(putInspection)
-	}
-	mux.Handle("PUT /api/inspections/{id}", putInspection)
+	mux.Handle("PUT /api/inspections/{id}", sessions.Require(http.HandlerFunc(inspections.Put)))
 	mux.Handle("GET /api/board", sessions.RequireRole("supervisor", http.HandlerFunc(boards.List)))
 	mux.Handle("GET /api/board/{rootId}", sessions.RequireRole("supervisor", http.HandlerFunc(boards.Detail)))
 	mux.Handle("GET /api/board/events", sessions.RequireRole("supervisor", http.HandlerFunc(boards.Events)))
-	return mux
+	return withFaults(mux, pool)
 }
