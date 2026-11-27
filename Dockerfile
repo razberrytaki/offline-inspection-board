@@ -1,6 +1,6 @@
 FROM node:24-bookworm-slim AS frontend
 WORKDIR /src/web
-RUN npm install --global pnpm@12.23.0
+RUN npm install --global pnpm@12.24.0
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/ ./
