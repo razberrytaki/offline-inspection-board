@@ -36,9 +36,9 @@ http://localhost:8080 을 연다. 데모 계정은 직원 `worker-1` / `demo-wor
 ```sh
 docker compose up -d --wait postgres
 go test -race ./...
-pnpm -C web install
-pnpm -C web test
-pnpm -C web test:e2e
+bun install --cwd web --frozen-lockfile
+bun run --cwd web test
+bun run --cwd web test:e2e
 ```
 
 Go 테스트는 실제 PostgreSQL에 같은 PUT 50개를 동시에 보내 한 건만 저장되는지 확인한다. Playwright 테스트는 직원과 감독자 브라우저를 따로 띄워 위 데모 흐름을 그대로 돌린다.

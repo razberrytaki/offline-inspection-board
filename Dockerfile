@@ -1,10 +1,10 @@
 FROM node:24-bookworm-slim AS frontend
 WORKDIR /src/web
-RUN npm install --global pnpm@12.24.0
-COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN npm install --global bun@1.4.5
+COPY web/package.json web/bun.lock web/bunfig.toml ./
+RUN CI=true bun install --frozen-lockfile
 COPY web/ ./
-RUN pnpm build
+RUN bun run build
 
 FROM golang:1.27.3-alpine AS backend
 WORKDIR /src

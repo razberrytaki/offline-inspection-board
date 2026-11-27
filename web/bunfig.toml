@@ -1,0 +1,6 @@
+[install]
+minimumReleaseAge = "1d"
+minimumReleaseAgeExcludes = ["svelte@5.59.2"]
+
+[install.security]
+scanner = "@socketsecurity/bun-security-scanner"
