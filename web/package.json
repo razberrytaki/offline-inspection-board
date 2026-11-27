@@ -2,7 +2,7 @@
   "name": "offline-inspection-board-web",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.23.0",
+  "packageManager": "pnpm@12.24.0",
   "scripts": {
     "dev": "vite",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.worker.json",
